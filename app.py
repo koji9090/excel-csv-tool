@@ -90,9 +90,8 @@ if uploaded_file:
                     if st.checkbox(f"{col_name} 列", value=True, key=col_idx):
                         selected_indices.append(col_idx)
 
-            # --- CSV作成ボタン（修正箇所） ---
+            # --- CSV作成ボタン ---
             st.markdown("---")
-            # ★ここを修正しました
             if st.button("🚀 選択した列のCSVを作成"):
                 if not selected_indices:
                     st.error("出力する列が一つも選ばれていません。")
@@ -110,4 +109,22 @@ if uploaded_file:
                         zip_buffer = io.BytesIO()
                         with zipfile.ZipFile(zip_buffer, 'w') as myzip:
                             for col_idx in selected_indices:
-                                col_name = openpyxl.utils.get_column_letter(col_idx +
+                                # エラーが出ていた箇所を修正（改行せず1行で記述）
+                                col_name = openpyxl.utils.get_column_letter(col_idx + 1)
+                                
+                                if col_idx < len(df.columns):
+                                    output_df = df.iloc[:, [0, col_idx]]
+                                    filename = f"output_column_{col_name}.csv"
+                                    csv_data = output_df.to_csv(header=False, index=False, encoding='utf-8-sig')
+                                    myzip.writestr(filename, csv_data)
+                        
+                        st.success("完了しました！下のボタンからダウンロードしてください。")
+                        st.download_button(
+                            label="📥 ZIPファイルをダウンロード",
+                            data=zip_buffer.getvalue(),
+                            file_name="処理結果.zip",
+                            mime="application/zip"
+                        )
+
+    except Exception as e:
+        st.error(f"エラーが発生しました: {e}")
