@@ -14,22 +14,16 @@ st.sidebar.header("⚙️ 設定")
 
 # 1. 基準列の設定
 st.sidebar.subheader("1. 基準列（店舗名）")
-anchor_col = st.sidebar.text_input(
-    "固定して使う列 (例: A)",
-    value="A"
-)
+anchor_col = st.sidebar.text_input("固定して使う列 (例: A)", value="A")
 
 # 2. 行の削除設定
 st.sidebar.subheader("2. 行の削除")
-skip_rows = st.sidebar.number_input(
-    "最初に削除する行数",
-    min_value=0,
-    value=2
-)
+skip_rows = st.sidebar.number_input("最初に削除する行数", min_value=0, value=2)
 
-# 3. 重複削除の設定（追加機能）
+# 3. 重複削除の設定
 st.sidebar.subheader("3. データの整理")
 remove_dup = st.sidebar.checkbox("重複した行を自動で削除する", value=True)
+st.sidebar.caption("※同じ店舗名・同じ数値の行がある場合、最初の行を残します。")
 
 # 4. 列の除外設定
 st.sidebar.subheader("4. 列の除外設定")
@@ -54,6 +48,20 @@ if uploaded_file:
             st.error("基準列の指定が間違っています。")
             st.stop()
 
+        # ---------------------------------------------------------
+        # 元データの読み込みと店舗リストの基準作成
+        # ---------------------------------------------------------
+        df_full = pd.read_excel(
+            io.BytesIO(file_bytes), 
+            header=None, 
+            skiprows=skip_rows, 
+            engine='openpyxl'
+        )
+        # 基準となる店舗名リスト（前後の空白除去）
+        original_stores = df_full.iloc[:, anchor_idx].astype(str).str.strip().tolist()
+        st.info(f"📊 元データの店舗数: {len(original_stores)} 件")
+
+        # --- 除外設定 ---
         ignore_indices = []
         if ignore_col_start and ignore_col_end:
             try:
@@ -101,41 +109,48 @@ if uploaded_file:
                     st.error("列が選択されていません。")
                 else:
                     with st.spinner('CSVを作成中...'):
-                        # 抽出用に pandas で読み込み
-                        df = pd.read_excel(
-                            io.BytesIO(file_bytes), 
-                            header=None, 
-                            skiprows=skip_rows, 
-                            engine='openpyxl'
-                        )
-                        
-                        max_idx = len(df.columns) - 1
                         zip_buffer = io.BytesIO()
+                        validation_errors = []
 
                         with zipfile.ZipFile(zip_buffer, 'w') as myzip:
                             for target_idx in selected_indices:
                                 col_letter = openpyxl.utils.get_column_letter(target_idx + 1)
-                                
-                                # ファイル名の設定（2行目の値を取得）
                                 cell_value_row2 = ws.cell(row=2, column=target_idx + 1).value
                                 suffix = f"_{cell_value_row2}" if cell_value_row2 is not None else ""
                                 filename = f"output_column_{col_letter}{suffix}.csv"
                                 
-                                if target_idx <= max_idx:
-                                    # 抽出
-                                    output_df = df.iloc[:, [anchor_idx, target_idx]]
-                                    
-                                    # 【修正ポイント】重複行を削除
-                                    if remove_dup:
-                                        output_df = output_df.drop_duplicates()
-                                    
-                                    # 空白行（店舗名が空の行など）も除外したい場合はここに追加
-                                    # output_df = output_df.dropna(subset=[output_df.columns[0]])
+                                # 抽出と加工
+                                output_df = df_full.iloc[:, [anchor_idx, target_idx]].copy()
+                                output_df.iloc[:, 0] = output_df.iloc[:, 0].astype(str).str.strip()
+                                
+                                if remove_dup:
+                                    output_df = output_df.drop_duplicates(keep='first')
 
-                                    csv_data = output_df.to_csv(header=False, index=False, encoding='utf-8-sig')
-                                    myzip.writestr(filename, csv_data)
+                                # ---------------------------------------------------------
+                                # 順番と件数のチェック
+                                # ---------------------------------------------------------
+                                current_stores = output_df.iloc[:, 0].tolist()
+                                if current_stores != original_stores:
+                                    diff_count = len(original_stores) - len(current_stores)
+                                    msg = f"【{col_letter}列】 元データと一致しません。"
+                                    if diff_count > 0:
+                                        msg += f"（重複などで {diff_count} 件減少）"
+                                    else:
+                                        msg += f"（並び順が変更されています）"
+                                    validation_errors.append(msg)
+
+                                # CSV書き出し
+                                csv_data = output_df.to_csv(header=False, index=False, encoding='utf-8-sig')
+                                myzip.writestr(filename, csv_data)
                         
-                        st.success("完了しました！")
+                        # チェック結果の表示
+                        if not validation_errors:
+                            st.success("✅ 全てのファイルが元データの順番・件数通りに作成されました！")
+                        else:
+                            with st.expander("⚠️ データに変更がありました（重複削除などの結果）"):
+                                for err in validation_errors:
+                                    st.write(err)
+
                         st.download_button(
                             label="📥 ZIPファイルをダウンロード",
                             data=zip_buffer.getvalue(),
