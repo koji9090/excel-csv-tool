@@ -7,7 +7,7 @@ import zipfile
 
 # === アプリのタイトル ===
 st.title("📂 Excel列分解＆CSV作成ツール")
-st.write("基準列と数式列をペアにしてCSV化します。（店舗名の整合性チェック付き）")
+st.write("基準列と数式列をペアにしてCSV化します。")
 
 # === サイドバー：設定エリア ===
 st.sidebar.header("⚙️ 設定")
@@ -42,18 +42,13 @@ if uploaded_file:
             st.error("基準列の指定が間違っています。")
             st.stop()
 
-        # --- 基準となる店舗リストの作成（重複を除いた正しい順番を保持） ---
+        # データの読み込み
         df_full = pd.read_excel(
             io.BytesIO(file_bytes), 
             header=None, 
             skiprows=skip_rows, 
             engine='openpyxl'
         )
-        # 元データのA列から、重複を除いた「本来あるべき店舗の並び順」を取得
-        original_series = df_full.iloc[:, anchor_idx].astype(str).str.strip()
-        base_store_list = original_series.drop_duplicates(keep='first').tolist()
-        
-        st.info(f"📊 抽出対象の総店舗数: {len(base_store_list)} 件")
 
         # --- 数式列の自動検出 ---
         ignore_indices = []
@@ -99,12 +94,10 @@ if uploaded_file:
                 else:
                     with st.spinner('作成中...'):
                         zip_buffer = io.BytesIO()
-                        check_passed = True
-                        error_cols = []
 
                         with zipfile.ZipFile(zip_buffer, 'w') as myzip:
                             for target_idx in selected_indices:
-                                # 1. ファイル名作成 (H列_2行目の値.csv)
+                                # 1. ファイル名作成 (列記号 + 2行目の値)
                                 col_letter = openpyxl.utils.get_column_letter(target_idx + 1)
                                 cell_value_row2 = ws.cell(row=2, column=target_idx + 1).value
                                 suffix = f"_{cell_value_row2}" if cell_value_row2 is not None else ""
@@ -115,21 +108,11 @@ if uploaded_file:
                                 output_df.iloc[:, 0] = output_df.iloc[:, 0].astype(str).str.strip()
                                 output_df = output_df.drop_duplicates(keep='first')
 
-                                # 3. 内部チェック：店舗リストと順番が一致するか
-                                current_store_list = output_df.iloc[:, 0].tolist()
-                                if current_store_list != base_store_list:
-                                    check_passed = False
-                                    error_cols.append(col_letter)
-
-                                # 4. 書き出し
+                                # 3. 書き出し
                                 csv_data = output_df.to_csv(header=False, index=False, encoding='utf-8-sig')
                                 myzip.writestr(filename, csv_data)
                         
-                        if check_passed:
-                            st.success(f"✅ チェック完了: すべての店舗（{len(base_store_list)}件）が正しい順番で出力されました。")
-                        else:
-                            st.warning(f"⚠️ 一部の列（{', '.join(error_cols)}）で、元の店舗リストと件数や順番が一致しませんでした。出力結果を確認してください。")
-
+                        st.success("✅ 完了しました。")
                         st.download_button(
                             label="📥 ZIPファイルをダウンロード",
                             data=zip_buffer.getvalue(),
