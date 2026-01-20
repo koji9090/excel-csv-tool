@@ -84,3 +84,35 @@ if uploaded_file:
                             col_letter = openpyxl.utils.get_column_letter(target_idx + 1)
                             row2_val = ws.cell(row=2, column=target_idx + 1).value
                             suffix = f"_{row2_val}" if row2_val is not None else ""
+                            filename = f"output_column_{col_letter}{suffix}.csv"
+                            
+                            # --- データの抽出と加工 ---
+                            # 指定した skip_rows 以降のデータを取得
+                            df_data = df_raw.iloc[skip_rows:].copy()
+                            
+                            # 基準列と対象列のみ抽出
+                            output_df = df_data.iloc[:, [anchor_idx, target_idx]]
+                            
+                            # 基準列（店舗名）の空白削除と型統一
+                            # ここで順番を入れ替えないように inplace=True は使わず慎重に処理
+                            temp_anchor = output_df.iloc[:, 0].astype(str).str.strip()
+                            
+                            # 店舗名が空（"nan" や ""）の行を除外（Excelの末尾の空行対策）
+                            mask = (temp_anchor != "nan") & (temp_anchor != "")
+                            output_df = output_df[mask]
+                            
+                            # 重複削除: 最初に現れた行(keep='first')を維持
+                            # subsetに基準列の「現在のインデックス番号」を指定
+                            output_df = output_df.drop_duplicates(subset=output_df.columns[0], keep='first')
+
+                            # 【重要】並び替えは一切行わず、そのまま出力
+                            csv_data = output_df.to_csv(header=False, index=False, encoding='utf-8-sig')
+                            myzip.writestr(filename, csv_data)
+                    
+                    st.success("✅ 完了しました。Excelの行順のまま出力しました。")
+                    st.download_button(label="📥 ダウンロード", data=zip_buffer.getvalue(), file_name="処理結果.zip")
+        else:
+            st.warning("数式列が見つかりませんでした。設定を確認してください。")
+
+    except Exception as e:
+        st.error(f"エラーが発生しました: {e}")
